@@ -2,11 +2,20 @@ from os import getenv
 from openai import OpenAI
 import faiss
 import numpy as np
+import peewee as pw
 
 client = OpenAI(
     api_key=getenv("DASHSCOPE_SHARE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
+
+db = pw.MySQLDatabase(database='ai_course', user='root', password=getenv("SQL_PWD"), host='localhost')
+class AIContext(pw.Model):
+    id = pw.AutoField()
+    text = pw.TextField()
+    class Meta:
+        database = db
+        table_name = 'ai_context'
 
 # 判断是否结束对话
 def IsExit(user_input):
@@ -17,18 +26,22 @@ def IsExit(user_input):
             {"role": "user", "content": user_input},
         ],
     )
+
     return completion.choices[0].message.content == "T"
 
 
-def GetResponse(offline_database, dim=1024,faiss_path="./faiss.index"):
+def GetResponse(dim=1024,faiss_path="./Project2/faiss.index"):
     faiss_index = faiss.read_index(faiss_path)
     messages = [
             {"role": "system", "content": "You are a helpful assistant."},
         ]
+    db.connect()
     while True:
         user_input = input("\nUser:")
         if IsExit(user_input):
             print("感谢您的咨询，再见")
+            # print("Thank you for your inquiry. Goodbye.")
+            db.close()
             break
         user_embedding = client.embeddings.create(
                 model="text-embedding-v3",
@@ -40,17 +53,8 @@ def GetResponse(offline_database, dim=1024,faiss_path="./faiss.index"):
         _, Index = faiss_index.search(np.array([embedded_user_input]).astype(np.float32), k=2)
         # print(Index)
 
-        data_str = []
-        relative_data = []
-        # 读取离线数据库
-        with open(offline_database,"r",encoding="utf-8") as f:
-            for data in f:
-                data_str.append(data)
-        for i in Index[0]:
-            relative_data.append(data_str[i])
-        
-        messages.append({"role": "assistant", "content": relative_data[0]})
-        messages.append({"role": "assistant", "content": relative_data[1]})
+        messages.append({"role": "assistant", "content": AIContext.get(AIContext.id == Index[0][0]+1).text})
+        messages.append({"role": "assistant", "content": AIContext.get(AIContext.id == Index[0][1]+1).text})
         messages.append({"role": "user", "content": user_input})
         completion = client.chat.completions.create(
             model="qwen-plus",
@@ -64,9 +68,8 @@ def GetResponse(offline_database, dim=1024,faiss_path="./faiss.index"):
         messages.append({"role": "system", "content": full_reply})
 
 if __name__ == "__main__":
-    path = "./运动鞋店铺知识库.txt"
     dim = 1024
-    GetResponse(path,dim)
+    GetResponse(dim)
 
 
 

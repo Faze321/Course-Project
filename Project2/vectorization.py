@@ -2,6 +2,7 @@ from os import getenv
 from openai import OpenAI
 import numpy as np
 import faiss
+import peewee as pw
 
 
 client = OpenAI(
@@ -9,18 +10,23 @@ client = OpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
 
-# 向量化
-def Embedding(file_path,dim=1024):
-    data_str = []
-    data_emb = []
-    with open(file_path,"r",encoding="utf-8") as f:
-        for data in f:
-            data_str.append(data)
+db = pw.MySQLDatabase(database='ai_course', user='root', password=getenv("SQL_PWD"), host='localhost')
+class AIContext(pw.Model):
+    id = pw.AutoField()
+    text = pw.TextField()
+    class Meta:
+        database = db
+        table_name = 'ai_context'
 
-    for i in range(0,len(data_str)):
+# 向量化
+def Embedding(dim=1024):
+    data_emb = []
+    raw_count = AIContext.select().count()
+
+    for i in range(0,raw_count):
         completion = client.embeddings.create(
             model="text-embedding-v3",
-            input=data_str[i],
+            input=AIContext.get(AIContext.id == i+1).text,
             dimensions=dim,
             encoding_format="float"
         )
@@ -36,7 +42,8 @@ def StoreEmbeddingData(EmbededData,dim):
 
 
 if __name__ == "__main__":
-    path = "./运动鞋店铺知识库.txt"
     dim = 1024
-    data_emb = Embedding(path,dim)
+    db.connect()
+    data_emb = Embedding(dim)
     StoreEmbeddingData(data_emb,dim)
+    db.close()
